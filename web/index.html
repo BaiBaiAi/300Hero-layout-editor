@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>300英雄界面布局编辑器</title>
+  <link rel="stylesheet" href="style.css?v=20260925-selection2">
+</head>
+<body>
+  <header>
+    <div class="brand"><b>300英雄界面布局编辑器</b><span>大厅 + 竞技场</span></div>
+    <label>编辑界面 <select id="mode"><option value="hall">大厅</option><option value="arena">竞技场对战</option></select></label>
+    <label class="game-dir">游戏目录 <input id="gameDir" value=""></label>
+    <button id="selectGameDir">选择游戏目录…</button>
+    <button id="analyze">重新分析 JMP</button>
+    <button id="extractAssets">抽取全部大厅资源</button>
+    <button id="undo">撤销</button><button id="redo">重做</button>
+    <button id="save">保存项目</button><button id="export" class="primary">导出布局</button>
+    <select id="savedProjects" title="已保存项目"><option value="">上次保存的布局…</option></select>
+    <button id="loadSaved">加载</button><button id="importFile">导入文件…</button>
+    <input id="projectFile" type="file" accept=".json,.halllayout.json,application/json" hidden>
+    <button id="previewPatch">预览 Lua 差异</button><button id="generatePatch">生成补丁</button>
+    <button id="applyGame" class="danger">应用到游戏</button><button id="restoreGame">恢复原版</button>
+  </header>
+  <div id="status">正在读取场景…</div>
+  <main>
+    <aside class="left">
+      <div class="panel-head">板块树</div>
+      <div class="state-row">
+        <label>预览状态</label>
+        <select id="state"><option value="live2d">Live2D 大厅</option><option value="normal">普通大厅</option></select>
+      </div>
+      <div class="state-row resolution-row" hidden>
+        <label>预览分辨率</label>
+        <select id="resolution"><option value="1280x800">1280 × 800（当前窗口）</option><option value="1366x768">1366 × 768</option><option value="1600x900">1600 × 900</option><option value="1920x1080">1920 × 1080</option><option value="2560x1440">2560 × 1440</option></select>
+      </div>
+      <div class="filters"><label><input type="checkbox" id="hotzones">显示边界</label><label><input type="checkbox" id="grid" checked>网格</label></div>
+      <div class="selection-tools"><button id="selectAll" type="button">全选</button><button id="invertSelection" type="button">反选</button><button id="clearSelection" type="button">取消选择</button><span id="selectionCount">0 项</span></div>
+      <section class="extra-options" id="hallOptions">
+        <h3>附加选项</h3>
+        <label><input type="checkbox" data-option="auto_minimize_chat"> 自动最小化聊天框</label>
+        <label><input type="checkbox" data-option="auto_accept_match"> 自动接受匹配</label>
+        <label><input type="checkbox" data-option="camera_35"> 提高视距上限至 35</label>
+        <label><input type="checkbox" data-option="clickable_surrender"> 同意投降可点击</label>
+        <small>随项目保存；应用到游戏后生效</small>
+      </section>
+      <div id="tree" tabindex="0" aria-label="布局板块列表"></div>
+    </aside>
+    <section class="workspace">
+      <div class="ruler">逻辑画布 1280 × 800 · 拖动板块，右下角拖动缩放</div>
+      <div id="viewport"><div id="canvas"></div></div>
+    </section>
+    <aside class="right">
+      <div class="panel-head">属性</div>
+      <div id="empty">选择一个或多个板块进行编辑；分组标题可一键全选</div>
+      <form id="props" hidden>
+        <h2 id="propTitle"></h2>
+        <label class="check"><input type="checkbox" id="visible"> 显示</label>
+        <label class="check"><input type="checkbox" id="locked"> 锁定</label>
+        <div class="quad">
+          <label>X <input type="number" id="x" step="1"></label>
+          <label>Y <input type="number" id="y" step="1"></label>
+          <label>宽 <input type="number" id="width" min="1" step="1"></label>
+          <label>高 <input type="number" id="height" min="1" step="1"></label>
+        </div>
+        <label>缩放 <input type="number" id="scale" min="0.1" max="5" step="0.05"></label>
+        <label id="anchorRow" hidden>分辨率锚点 <select id="anchor"><option value="top-left">左上</option><option value="top-center">顶部居中</option><option value="top-right">右上</option><option value="left-middle">左侧居中</option><option value="center">画面中心</option><option value="right-middle">右侧居中</option><option value="bottom-left">左下</option><option value="bottom-center">底部居中</option><option value="bottom-right">右下</option></select></label>
+        <label>透明度 <input type="range" id="opacity" min="0.05" max="1" step="0.05"><output id="opacityValue"></output></label>
+        <label>显示资源 <input id="assetHint" list="assetOptions" placeholder="从已抽取资源中搜索"></label>
+        <datalist id="assetOptions"></datalist>
+        <div class="button-row"><button type="button" data-align="left">左对齐</button><button type="button" data-align="center">水平居中</button><button type="button" data-align="right">右对齐</button></div>
+        <div class="button-row"><button type="button" data-align="top">顶部</button><button type="button" data-align="middle">垂直居中</button><button type="button" data-align="bottom">底部</button></div>
+        <label>分组 <input id="group" readonly></label>
+        <label>说明 <textarea id="note" readonly></textarea></label>
+        <div class="source" id="source"></div>
+        <button type="button" id="resetNode">恢复此板块</button>
+      </form>
+      <div class="panel-head warnings-title">分析信息</div>
+      <div id="warnings"></div>
+      <div class="panel-head warnings-title">本地资源库</div>
+      <div id="assetsInfo"></div>
+    </aside>
+  </main>
+  <dialog id="diffDialog"><div class="dialog-head"><b>Lua 补丁差异</b><button id="closeDiff">关闭</button></div><pre id="diffText"></pre></dialog>
+  <script src="app.js?v=20260925-selection2"></script>
+</body>
+</html>

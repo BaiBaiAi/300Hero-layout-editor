@@ -1,0 +1,25 @@
+name: 错误报告
+description: 报告可重复出现的问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请写明游戏目录、操作顺序和错误文字。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: 请填写 Windows 版本、程序版本，以及使用 EXE 还是源码运行。
+    validations:
+      required: true
