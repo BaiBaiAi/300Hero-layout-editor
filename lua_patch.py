@@ -14,6 +14,12 @@ from hall_scene import LuaSource
 MARK_BEGIN = "--[[ 300HERO_LAYOUT_EDITOR_BEGIN ]]"
 MARK_END = "--[[ 300HERO_LAYOUT_EDITOR_END ]]"
 INLINE_MASK_MARK = "-- 300HERO_LAYOUT_EDITOR_INLINE_HOME_MASK"
+NOTICE_PLACEHOLDER = "    -- 300HERO_LAYOUT_EDITOR_NOTICE_DEFERRED"
+NOTICE_BEGIN = "-- 300HERO_LAYOUT_EDITOR_NOTICE_BEGIN"
+NOTICE_BODY_BEGIN = "    -- 300HERO_LAYOUT_EDITOR_NOTICE_BODY_BEGIN"
+NOTICE_BODY_END = "    -- 300HERO_LAYOUT_EDITOR_NOTICE_BODY_END"
+NOTICE_END = "-- 300HERO_LAYOUT_EDITOR_NOTICE_END"
+ACTIVITY_SKIP_MARK = "-- 300HERO_LAYOUT_EDITOR_SKIP_LOGIN_ACTIVITY"
 
 
 @dataclass
@@ -87,11 +93,86 @@ def _clean_previous(text: str) -> str:
     pattern = re.compile(r"\n?" + re.escape(MARK_BEGIN) + r".*?" + re.escape(MARK_END) + r"\n?", re.S)
     text = pattern.sub("\n", text)
     text = re.sub(r"^\s*mask:SetVisible\(0\)\s*" + re.escape(INLINE_MASK_MARK) + r"\s*\r?\n?", "", text, flags=re.M)
+    text = _restore_deferred_notice(text)
+    text = _restore_activity_request(text)
     return text.rstrip() + "\n"
+
+
+def _restore_activity_request(text: str) -> str:
+    return text.replace(ACTIVITY_SKIP_MARK, "XReqNeedShowActivity(249)")
+
+
+def _suppress_activity_request(text: str) -> str:
+    pattern = re.compile(r"(?m)^([ \t]*)XReqNeedShowActivity\(249\)([ \t]*)(\r?)$")
+    edited, count = pattern.subn(r"\g<1>" + ACTIVITY_SKIP_MARK + r"\g<2>\g<3>", text)
+    if count > 1:
+        raise ValueError("发现多个登录活动请求，无法安全生成补丁")
+    return edited
+
+
+def _restore_deferred_notice(text: str) -> str:
+    if NOTICE_BEGIN not in text:
+        return text
+    newline = "\r\n" if "\r\n" in text else "\n"
+    start = text.index(NOTICE_BEGIN)
+    end = text.index(NOTICE_END, start) + len(NOTICE_END)
+    block = text[start:end]
+    manual_call = "__hall_notice_load(g_up)" + newline + "        SetUpdateWndIsVisible(1, true)"
+    guarded_function = ("function SetUpdateWndIsVisible(flag, manual)" + newline
+                        + "    if flag >= 1 and not manual then return end")
+    if (text[end:end + 2 * len(newline)] != newline * 2
+            or text.count(NOTICE_PLACEHOLDER + newline) != 1
+            or text.count(manual_call) != 1 or text.count(guarded_function) != 1):
+        raise ValueError("公告补丁结构已变化，无法安全恢复")
+    body_start = block.index(NOTICE_BODY_BEGIN) + len(NOTICE_BODY_BEGIN) + len(newline)
+    body_end = block.index(NOTICE_BODY_END)
+    body = block[body_start:body_end]
+    text = text[:start] + text[end + 2 * len(newline):]
+    text = text.replace(NOTICE_PLACEHOLDER + newline, body, 1)
+    text = text.replace(manual_call, "SetUpdateWndIsVisible(1)", 1)
+    text = text.replace(guarded_function, "function SetUpdateWndIsVisible(flag)", 1)
+    return text
+
+
+def _defer_login_notice(text: str) -> str:
+    newline = "\r\n" if "\r\n" in text else "\n"
+    up = text.find("function Init_MenuListpart_up(wnd)")
+    common = text.find("function Init_MenuListpart_common(wnd)", up)
+    if up < 0 or common < 0:
+        raise ValueError("无法定位公告初始化函数，已停止生成补丁")
+    section = text[up:common]
+    start_match = re.search(r"(?m)^[ \t]*UpdateWnd = wnd:AddImage\(path_loltimertower[^\r\n]*\r?\n", section)
+    end_match = re.search(r"(?m)^[ \t]*CreateUpdateShopSkinWnd\(UpdateShopSkinWnd\)[^\r\n]*\r?\n", section)
+    if not start_match or not end_match or end_match.start() <= start_match.start():
+        raise ValueError("无法定位完整公告窗口，已停止生成补丁")
+    body = section[start_match.start():end_match.end()]
+    section = section[:start_match.start()] + NOTICE_PLACEHOLDER + newline + section[end_match.end():]
+    lazy = newline.join([
+        NOTICE_BEGIN,
+        "local __hall_notice_owner = nil",
+        "function __hall_notice_load(wnd)",
+        "    if __hall_notice_owner == wnd then return end",
+        "    __hall_notice_owner = wnd",
+        NOTICE_BODY_BEGIN,
+    ]) + newline + body + NOTICE_BODY_END + newline + "end" + newline + NOTICE_END + newline + newline
+    section += lazy
+    text = text[:up] + section + text[common:]
+    button = re.compile(r"(Updatebk\.script\[XE_LBUP\] = function\(\)(?:(?!^[ \t]*end[ \t]*$).)*?)SetUpdateWndIsVisible\(1\)", re.S | re.M)
+    text, button_count = button.subn(r"\g<1>__hall_notice_load(g_up)" + newline + "        SetUpdateWndIsVisible(1, true)", text, count=1)
+    if button_count != 1:
+        raise ValueError("无法定位手动公告按钮，已停止生成补丁")
+    original = "function SetUpdateWndIsVisible(flag)"
+    if text.count(original) != 1:
+        raise ValueError("无法定位公告显示函数，已停止生成补丁")
+    text = text.replace(original, "function SetUpdateWndIsVisible(flag, manual)" + newline
+                        + "    if flag >= 1 and not manual then return end", 1)
+    return text
 
 
 def _apply_inline_edits(name: str, text: str, scene: dict) -> str:
     """Apply edits that must run while an original Lua local is still in scope."""
+    if name == "game_shop_hero_equip.lua" and (scene.get("options") or {}).get("suppress_login_notice"):
+        return _suppress_activity_request(_defer_login_notice(text))
     if name != "game_hall.lua":
         return text
     edited = text
@@ -228,6 +309,12 @@ def build_patches(scene: dict, sources: dict[str, LuaSource]) -> list[PatchFile]
         original = _clean_previous(source.text)
         patched = _apply_inline_edits(name, original, scene) + "\n" + _block(name, scene)
         patches.append(PatchFile(name, source.path, source.pack, source.index, original, patched))
+    source = sources.get("gamedef.lua")
+    if source and ((scene.get("options") or {}).get("suppress_login_notice")
+                   or ACTIVITY_SKIP_MARK in source.text):
+        clean = _clean_previous(source.text)
+        patched = _suppress_activity_request(clean) if (scene.get("options") or {}).get("suppress_login_notice") else clean
+        patches.append(PatchFile("gamedef.lua", source.path, source.pack, source.index, source.text, patched))
     return patches
 
 
@@ -251,7 +338,7 @@ def export_patches(patches: list[PatchFile], folder: Path) -> Path:
 
 def locate_entry(packs: list[jc.Pack], patch: PatchFile):
     target = patch.internal_path.replace('/', '\\').lower()
-    for pack in packs:
+    for pack in reversed(packs):
         for entry in pack.entries:
             if entry.path.replace('/', '\\').lower() == target:
                 return pack, entry
@@ -275,7 +362,11 @@ def apply_patches(scene: dict, patches: list[PatchFile], packs: list[jc.Pack], b
         # Rebase the generated block onto the latest target file to preserve any
         # unrelated edits made after the editor first analyzed the game.
         clean_text = _clean_previous(current_text)
-        new_text = _apply_inline_edits(patch.name, clean_text, scene) + "\n" + _block(patch.name, scene)
+        if patch.name == "gamedef.lua":
+            new_text = (_suppress_activity_request(clean_text)
+                        if (scene.get("options") or {}).get("suppress_login_notice") else clean_text)
+        else:
+            new_text = _apply_inline_edits(patch.name, clean_text, scene) + "\n" + _block(patch.name, scene)
         new_raw = new_text.encode("gb18030")
         result = jc.patch_entry(pack, entry, new_raw, str(backup_dir), allow_overflow=True)
         checked = jc.read_entry(pack, entry)

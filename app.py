@@ -21,8 +21,6 @@ from hall_scene import analyze_game, export_project, save_project
 from resource_export import extract_lobby_resources, load_asset_manifest
 from lua_patch import apply_scene, build_patches, export_patches, restore_all
 from additional_options import apply_options, build_option_changes, export_options, preview_options
-from arena_scene import analyze_arena, export_arena_project
-from arena_patch import apply_arena, build_arena_patches
 from settings_store import choose_game_dir, has_jmp_files, load_settings, save_settings
 from version_history import snapshot_current_version
 
@@ -35,7 +33,6 @@ ASSETS = ROOT / "assets"
 GAME_BACKUPS = ROOT / "game_backups"
 OPTION_BASELINES = ROOT / "option_baselines"
 OPTION_TEMPLATES = BUNDLE_ROOT / "option_templates"
-DEFAULT_GAME_DIR = r"D:\JumpGame\300Hero"
 SETTINGS_FILE = ROOT / "config" / "settings.json"
 VERSION_HISTORY = ROOT / "version_history"
 
@@ -47,8 +44,6 @@ class State:
         self.packs = []
         self.sources = {}
         self.scene = None
-        self.arena_sources = {}
-        self.arena_scene = None
         self.error = ""
         self.resource_index = {}
         self.resource_cache = {}
@@ -61,7 +56,6 @@ class State:
             if not has_jmp_files(self.game_dir):
                 raise FileNotFoundError("所选目录中没有 Data*.jmp，请重新选择游戏目录")
             self.packs, self.sources, self.scene = analyze_game(self.game_dir)
-            self.arena_sources, self.arena_scene = analyze_arena(self.packs, self.game_dir)
             self.resource_index = {}
             for pack in self.packs:
                 for entry in pack.entries:
@@ -139,6 +133,13 @@ def json_bytes(value) -> bytes:
     return json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")
 
 
+def hall_scene(scene):
+    if (not isinstance(scene, dict) or scene.get("format") != "300hero-layout/1"
+            or scene.get("mode") not in (None, "hall") or not isinstance(scene.get("nodes"), list)):
+        raise ValueError("仅支持大厅布局项目")
+    return scene
+
+
 def make_handler(state: State):
     class Handler(BaseHTTPRequestHandler):
         server_version = "300HeroEditor/0.1"
@@ -183,6 +184,9 @@ def make_handler(state: State):
                 self.send_json({"gameDir": state.game_dir, "scene": scene})
                 return
             if path == "/api/scene":
+                if parse_qs(parsed.query).get("mode", ["hall"])[0] != "hall":
+                    self.send_json({"error": "仅支持大厅布局项目"}, 400)
+                    return
                 if state.scene is None:
                     try:
                         state.analyze()
@@ -190,8 +194,7 @@ def make_handler(state: State):
                         state.error = str(exc)
                         self.send_json({"error": str(exc)}, 500)
                         return
-                mode = parse_qs(parsed.query).get('mode', ['hall'])[0]
-                self.send_json(state.arena_scene if mode == 'arena' else state.scene)
+                self.send_json(state.scene)
                 return
             if path == "/api/assets":
                 self.send_json(state.asset_manifest or {"resourceCount": 0, "previewCount": 0,
@@ -201,9 +204,9 @@ def make_handler(state: State):
                 folder = ROOT / "projects"
                 folder.mkdir(exist_ok=True)
                 items = []
-                for file in sorted(list(folder.glob("*.halllayout.json")) + list(folder.glob("*.arenalayout.json")),
+                for file in sorted(folder.glob("*.halllayout.json"),
                                    key=lambda value: value.stat().st_mtime, reverse=True):
-                    suffix = '.arenalayout.json' if file.name.endswith('.arenalayout.json') else '.halllayout.json'
+                    suffix = '.halllayout.json'
                     items.append({"name": file.name[:-len(suffix)], "file": file.name,
                                   "modified": int(file.stat().st_mtime), "size": file.stat().st_size})
                 self.send_json({"projects": items})
@@ -237,61 +240,58 @@ def make_handler(state: State):
             try:
                 body = self.body_json()
                 if path == "/api/analyze":
+                    if body.get("mode", "hall") != "hall":
+                        raise ValueError("仅支持大厅布局项目")
                     scene = state.analyze(body.get("gameDir") or state.game_dir)
-                    self.send_json(state.arena_scene if body.get("mode") == "arena" else scene)
+                    self.send_json(scene)
                     return
                 if path == "/api/extract-assets":
                     self.send_json(state.extract_assets())
                     return
                 if path == "/api/load-project":
                     name = Path(str(body.get("file", ""))).name
-                    if not (name.endswith(".halllayout.json") or name.endswith(".arenalayout.json")):
+                    if not name.endswith(".halllayout.json"):
                         raise ValueError("不是有效的布局项目文件")
                     file = ROOT / "projects" / name
                     if not file.is_file():
                         raise FileNotFoundError("项目不存在：" + name)
                     loaded = json.loads(file.read_text(encoding="utf-8"))
-                    if loaded.get("format") not in ("300hero-layout/1", "300arena-layout/1") or not isinstance(loaded.get("nodes"), list):
-                        raise ValueError("项目格式无效")
+                    hall_scene(loaded)
                     self.send_json(loaded)
                     return
                 if path == "/api/preview-patch":
-                    scene = body.get("scene") or body
-                    arena = scene.get("mode") == "arena"
-                    patches = build_arena_patches(scene, state.arena_sources) if arena else build_patches(scene, state.sources)
+                    scene = hall_scene(body.get("scene") or body)
+                    patches = build_patches(scene, state.sources)
                     files = [{"name": p.name, "path": p.internal_path,
                                                 "pack": p.pack, "index": p.index,
                                                 "changed": p.changed, "diff": p.diff}
                                                for p in patches]
-                    files += [] if arena else [{"name": x["option"], "path": x["path"], "pack": x["pack"],
+                    files += [{"name": x["option"], "path": x["path"], "pack": x["pack"],
                                "index": None, "changed": True, "diff": x["diff"]}
                               for x in preview_options(scene, state.packs, OPTION_TEMPLATES, OPTION_BASELINES)]
                     self.send_json({"files": files})
                     return
                 if path == "/api/generate-patch":
-                    scene = body.get("scene") or body
+                    scene = hall_scene(body.get("scene") or body)
                     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    arena = scene.get("mode") == "arena"
-                    folder = export_patches(build_arena_patches(scene, state.arena_sources) if arena else build_patches(scene, state.sources),
-                                            ROOT / "exports" / (("竞技场布局补丁_" if arena else "游戏Lua补丁_") + stamp))
-                    extras = [] if arena else export_options(scene, state.packs, OPTION_TEMPLATES, OPTION_BASELINES, folder)
+                    folder = export_patches(build_patches(scene, state.sources),
+                                            ROOT / "exports" / ("游戏Lua补丁_" + stamp))
+                    extras = export_options(scene, state.packs, OPTION_TEMPLATES, OPTION_BASELINES, folder)
                     self.send_json({"ok": True, "path": str(folder), "additionalOptions": len(extras)})
                     return
                 if path == "/api/apply-game":
-                    scene = body.get("scene") or body
-                    arena = scene.get("mode") == "arena"
-                    patches = build_arena_patches(scene, state.arena_sources) if arena else build_patches(scene, state.sources)
+                    scene = hall_scene(body.get("scene") or body)
+                    patches = build_patches(scene, state.sources)
                     history_targets = list(patches)
-                    if not arena:
-                        from types import SimpleNamespace
-                        option_changes = build_option_changes(scene, state.packs, OPTION_TEMPLATES,
-                                                              OPTION_BASELINES, False)
-                        history_targets += [SimpleNamespace(internal_path=x["path"]) for x in option_changes]
+                    from types import SimpleNamespace
+                    option_changes = build_option_changes(scene, state.packs, OPTION_TEMPLATES,
+                                                          OPTION_BASELINES, False)
+                    history_targets += [SimpleNamespace(internal_path=x["path"]) for x in option_changes]
                     previous_version = snapshot_current_version(history_targets, state.packs,
                                                                 VERSION_HISTORY, state.game_dir)
-                    results = apply_arena(scene, state.arena_sources, state.packs, GAME_BACKUPS) if arena else apply_scene(scene, state.sources, state.packs, GAME_BACKUPS)
-                    option_results = [] if arena else apply_options(scene, state.packs, OPTION_TEMPLATES,
-                                                                    OPTION_BASELINES, GAME_BACKUPS)
+                    results = apply_scene(scene, state.sources, state.packs, GAME_BACKUPS)
+                    option_results = apply_options(scene, state.packs, OPTION_TEMPLATES,
+                                                   OPTION_BASELINES, GAME_BACKUPS)
                     results += option_results
                     # Reload indexes/source texts so future previews use the patched files.
                     state.analyze(state.game_dir)
@@ -304,20 +304,16 @@ def make_handler(state: State):
                     self.send_json({"ok": True, "count": len(results), "results": results})
                     return
                 if path == "/api/save":
-                    scene = body.get("scene") or body
+                    scene = hall_scene(body.get("scene") or body)
                     name = body.get("name", "大厅布局项目") if isinstance(body, dict) else "大厅布局项目"
                     safe = "".join(c for c in name if c not in '<>:"/\\|?*').strip() or "大厅布局项目"
-                    suffix = ".arenalayout.json" if scene.get("mode") == "arena" else ".halllayout.json"
-                    path_out = save_project(scene, ROOT / "projects" / (safe + suffix))
+                    path_out = save_project(scene, ROOT / "projects" / (safe + ".halllayout.json"))
                     self.send_json({"ok": True, "path": str(path_out)})
                     return
                 if path == "/api/export":
-                    scene = body.get("scene") or body
+                    scene = hall_scene(body.get("scene") or body)
                     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    if scene.get("mode") == "arena":
-                        folder = export_arena_project(scene, state.arena_sources, ROOT / "exports" / ("竞技场布局_" + stamp))
-                    else:
-                        folder = export_project(scene, state.sources, ROOT / "exports" / ("大厅布局_" + stamp))
+                    folder = export_project(scene, state.sources, ROOT / "exports" / ("大厅布局_" + stamp))
                     self.send_json({"ok": True, "path": str(folder)})
                     return
                 self.send_json({"error": "未知接口"}, 404)
@@ -334,10 +330,15 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
     settings = load_settings(SETTINGS_FILE)
-    requested = args.game_dir or settings.get("gameDir") or DEFAULT_GAME_DIR
+    requested = args.game_dir or settings.get("gameDir") or ""
     if not has_jmp_files(requested):
-        requested = choose_game_dir(requested) or requested
+        requested = choose_game_dir(requested)
+    if not has_jmp_files(requested):
+        print("未选择有效的游戏目录；下次启动时会再次提示选择。")
+        return 1
     state = State(os.path.abspath(requested))
+    settings["gameDir"] = state.game_dir
+    save_settings(SETTINGS_FILE, settings)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     url = "http://127.0.0.1:%d/" % server.server_port
     print("300大厅布局编辑器已启动：" + url)
@@ -350,7 +351,8 @@ def main():
         pass
     finally:
         server.server_close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

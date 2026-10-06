@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "300hero-layout-editor"
-version = "1.0.0"
-description = "300英雄大厅与竞技场界面布局编辑器"
+version = "1.0.1"
+description = "300英雄大厅布局编辑器"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -16,4 +16,4 @@ dependencies = ["Pillow>=10.0"]
 300hero-editor = "app:main"
 
 [tool.setuptools]
-py-modules = ["app", "jmp_core", "hall_scene", "lua_patch", "arena_scene", "arena_patch", "additional_options", "resource_export", "settings_store", "version_history"]
+py-modules = ["app", "jmp_core", "hall_scene", "lua_patch", "additional_options", "resource_export", "settings_store", "version_history"]

@@ -20,7 +20,9 @@ TARGET_LUA = {
     "game_main.lua",
     "game_uxbutton.lua",
     "game_loginui.lua",
+    "gamedef.lua",
 }
+OPTIONAL_LUA = {"gamedef.lua"}
 
 
 @dataclass
@@ -45,7 +47,6 @@ def source_line(text: str, needle: str) -> int | None:
 
 def find_lua_sources(packs: Iterable[jc.Pack]) -> dict[str, LuaSource]:
     found: dict[str, LuaSource] = {}
-    priority = {"data9.jmp": 9, "data8.jmp": 8, "data7.jmp": 7, "data6.jmp": 6}
     for pack in packs:
         if not pack.parse_ok:
             continue
@@ -53,6 +54,8 @@ def find_lua_sources(packs: Iterable[jc.Pack]) -> dict[str, LuaSource]:
             low = normalize(entry.path)
             name = low.rsplit("\\", 1)[-1]
             if name not in TARGET_LUA or "\\data\\script\\" not in low:
+                continue
+            if name == "gamedef.lua" and not low.endswith("\\login\\gamedef.lua"):
                 continue
             # Do not select the PVE/experience-server mirrors for the normal client.
             if "\\pve\\" in low or "\\tiyan\\" in low:
@@ -69,9 +72,8 @@ def find_lua_sources(packs: Iterable[jc.Pack]) -> dict[str, LuaSource]:
                 text = raw.decode("latin1")
             item = LuaSource(entry.path, pack.base_name(), entry.index, text,
                              hashlib.md5(raw).hexdigest())
-            previous = found.get(name)
-            if previous is None or priority.get(pack.base_name().lower(), 0) > priority.get(previous.pack.lower(), 0):
-                found[name] = item
+            # Later Data*.jmp packs override earlier copies of the same Lua path.
+            found[name] = item
     return found
 
 
@@ -218,12 +220,12 @@ def build_scene(sources: dict[str, LuaSource], game_dir: str) -> dict:
             "auto_minimize_chat": True,
             "auto_accept_match": False,
             "camera_35": False,
-            "clickable_surrender": False,
+            "suppress_login_notice": False,
         },
         "nodes": n,
         "sources": {k: {"path": v.path, "pack": v.pack, "index": v.index, "md5": v.md5}
                     for k, v in sources.items()},
-        "warnings": (["未找到：" + name for name in sorted(TARGET_LUA - set(sources))]),
+        "warnings": (["未找到：" + name for name in sorted(TARGET_LUA - OPTIONAL_LUA - set(sources))]),
     }
 
 

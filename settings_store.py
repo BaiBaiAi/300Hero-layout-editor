@@ -20,23 +20,35 @@ def save_settings(path: Path, value: dict) -> None:
 
 
 def has_jmp_files(game_dir: str) -> bool:
+    if not isinstance(game_dir, str) or not game_dir.strip():
+        return False
     folder = Path(game_dir)
-    return folder.is_dir() and any(folder.glob("Data*.jmp"))
+    return folder.is_dir() and any(path.is_file() for path in folder.glob("Data*.jmp"))
 
 
 def choose_game_dir(initial: str = "") -> str:
+    root = None
     try:
         import tkinter as tk
-        from tkinter import filedialog
+        from tkinter import filedialog, messagebox
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
-        selected = filedialog.askdirectory(
-            title="请选择包含 Data*.jmp 的 300英雄游戏目录",
-            initialdir=initial if Path(initial).is_dir() else None,
-            mustexist=True,
-        )
-        root.destroy()
-        return selected or ""
+        while True:
+            selected = filedialog.askdirectory(
+                title="请选择包含 Data*.jmp 的 300英雄游戏目录",
+                initialdir=initial if isinstance(initial, str) and Path(initial).is_dir() else None,
+                mustexist=True,
+                parent=root,
+            )
+            if not selected:
+                return ""
+            if has_jmp_files(selected):
+                return selected
+            messagebox.showerror("游戏目录无效", "所选目录中没有 Data*.jmp，请选择 300英雄游戏目录。", parent=root)
+            initial = selected
     except Exception:
         return ""
+    finally:
+        if root is not None:
+            root.destroy()

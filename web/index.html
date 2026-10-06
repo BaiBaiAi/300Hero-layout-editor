@@ -3,13 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>300英雄界面布局编辑器</title>
+  <title>300英雄大厅布局编辑器</title>
   <link rel="stylesheet" href="style.css?v=20260925-selection2">
 </head>
 <body>
   <header>
-    <div class="brand"><b>300英雄界面布局编辑器</b><span>大厅 + 竞技场</span></div>
-    <label>编辑界面 <select id="mode"><option value="hall">大厅</option><option value="arena">竞技场对战</option></select></label>
+    <div class="brand"><b>300英雄大厅布局编辑器</b><span>大厅</span></div>
     <label class="game-dir">游戏目录 <input id="gameDir" value=""></label>
     <button id="selectGameDir">选择游戏目录…</button>
     <button id="analyze">重新分析 JMP</button>
@@ -30,10 +29,6 @@
         <label>预览状态</label>
         <select id="state"><option value="live2d">Live2D 大厅</option><option value="normal">普通大厅</option></select>
       </div>
-      <div class="state-row resolution-row" hidden>
-        <label>预览分辨率</label>
-        <select id="resolution"><option value="1280x800">1280 × 800（当前窗口）</option><option value="1366x768">1366 × 768</option><option value="1600x900">1600 × 900</option><option value="1920x1080">1920 × 1080</option><option value="2560x1440">2560 × 1440</option></select>
-      </div>
       <div class="filters"><label><input type="checkbox" id="hotzones">显示边界</label><label><input type="checkbox" id="grid" checked>网格</label></div>
       <div class="selection-tools"><button id="selectAll" type="button">全选</button><button id="invertSelection" type="button">反选</button><button id="clearSelection" type="button">取消选择</button><span id="selectionCount">0 项</span></div>
       <section class="extra-options" id="hallOptions">
@@ -41,7 +36,7 @@
         <label><input type="checkbox" data-option="auto_minimize_chat"> 自动最小化聊天框</label>
         <label><input type="checkbox" data-option="auto_accept_match"> 自动接受匹配</label>
         <label><input type="checkbox" data-option="camera_35"> 提高视距上限至 35</label>
-        <label><input type="checkbox" data-option="clickable_surrender"> 同意投降可点击</label>
+        <label><input type="checkbox" data-option="suppress_login_notice"> 登录后不自动弹出公告和活动</label>
         <small>随项目保存；应用到游戏后生效</small>
       </section>
       <div id="tree" tabindex="0" aria-label="布局板块列表"></div>
@@ -64,7 +59,6 @@
           <label>高 <input type="number" id="height" min="1" step="1"></label>
         </div>
         <label>缩放 <input type="number" id="scale" min="0.1" max="5" step="0.05"></label>
-        <label id="anchorRow" hidden>分辨率锚点 <select id="anchor"><option value="top-left">左上</option><option value="top-center">顶部居中</option><option value="top-right">右上</option><option value="left-middle">左侧居中</option><option value="center">画面中心</option><option value="right-middle">右侧居中</option><option value="bottom-left">左下</option><option value="bottom-center">底部居中</option><option value="bottom-right">右下</option></select></label>
         <label>透明度 <input type="range" id="opacity" min="0.05" max="1" step="0.05"><output id="opacityValue"></output></label>
         <label>显示资源 <input id="assetHint" list="assetOptions" placeholder="从已抽取资源中搜索"></label>
         <datalist id="assetOptions"></datalist>

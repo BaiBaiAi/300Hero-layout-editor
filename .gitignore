@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+config/
+game_backups/
+option_baselines/
+version_history/
+build/
+dist/
+*.spec
+assets/*
+!assets/.gitkeep
+projects/*
+!projects/.gitkeep
